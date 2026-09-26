@@ -76,13 +76,9 @@ The platform provisions a multi-tier microservice architecture decoupled into pr
 ### Flow Walkthrough (Step-by-step request flow)
 
 1. **North-South Ingress**: External user traffic hits an AWS Network Load Balancer managed by the Istio IngressGateway, acting as the centralized cluster API Gateway.
-
 2. **Edge Routing**: Istio `Gateway` and `VirtualService` resources evaluate layer-7 route rules, forwarding traffic to the internal frontend service.
-
 3. **East-West Encryption**: Frontend communication to the Python FastAPI backend is secured inside an mTLS (Mutual TLS) tunnel automatically negotiated between Envoy sidecars.
-
 4. **Data Layer Isolation:** PostgreSQL runs as a `StatefulSet` with an EBS-backed `PersistentVolumeClaim`. Ingress is restricted exclusively to the backend service via Kubernetes `NetworkPolicy`.
-
 5. **Distributed Telemetry**: All HTTP spans (`x-request-id`, B3 propagation) flow into Jaeger, while Envoy metrics are scraped by Prometheus.
 
 ## 2. Platform Capabilities & Compliance Matrix
@@ -102,7 +98,7 @@ The platform provisions a multi-tier microservice architecture decoupled into pr
 ### OpenTofu vs. Proprietary Terraform
 * **Open Source Governance:** Maintained under the Linux Foundation using the permissive Mozilla Public License v2.0 (MPL-2.0), avoiding HashiCorp's Business Source License (BSL/BUSL 1.1) commercial restrictions.
 * **Licensing Compliance:** Guarantees enterprise infrastructure codebases remain free from vendor lock-in or licensing disputes.
-* **Drop-in Compatibility:** Direct drop-in binary compatibility (`tofu init`, `tofu plan`, `tofu apply`) supporting AWS providers, local CLI commands, S3 remote state backends, and DynamoDB lock tables.
+* **Drop-in Compatibility:** Direct drop-in binary compatibility (tofu init, tofu plan, tofu apply) supporting AWS providers, local CLI commands, and native S3 remote state locking (eliminating the need for DynamoDB).
 
 ### Hardened Multi-Stage Distroless Containers
 * **CVE Footprint Elimination:** The build stage compiles binaries and resolves packages inside heavy builder images, while the runtime stage selectively copies only compiled executables into `gcr.io/distroless` containers.
@@ -151,7 +147,7 @@ The platform provisions a multi-tier microservice architecture decoupled into pr
 │       ├── azure/                    # Azure Disk / AGIC overlays
 │       └── gcp/                      # GCP GKE / Managed Cert overlays
 ├── scripts/
-│   ├── bootstrap-aws.sh              # Provisions S3 state, DynamoDB lock, and ECR
+│   ├── bootstrap-aws.sh              # Provisions S3 with native state locking and ECR
 │   ├── teardown-aws.sh               # Decommissions cloud bootstrap assets
 │   └── test-traffic.sh               # Chaos load generator and fault injector
 └── opentofu/
@@ -164,26 +160,33 @@ The platform provisions a multi-tier microservice architecture decoupled into pr
 
 Ensure the following tools are installed and available on your system execution path:
 * **OpenTofu:** `tofu version` (>= 1.8.x)
-* **AWS CLI:** `aws --version` (>= 2.15.x) configured with an active administrative profile
+* **AWS CLI:** `aws --version` (>= 2.15.x)
 * **Docker CLI:** `docker version` (>= 24.x)
 * **Kubernetes CLI:** `kubectl version --client` (>= 1.28.x)
 * **Istio CLI:** `istioctl version` (>= 1.22.x)
 * **Helm:** `helm version` (>= 3.14.x)
 * **curl / jq:** Command-line utilities for payload generation and telemetry parsing
 
----
+### Local AWS Authentication
+Before executing any infrastructure scripts, you must authenticate your local terminal with an AWS IAM User that possesses `AdministratorAccess`. **Do not use the AWS Root account.**
+
+```bash
+# Configure your local AWS profile (Requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)
+`aws configure`
+
+# Verify your active identity
+`aws sts get-caller-identity`
 
 ## 6. Step-by-Step Deployment Runbook
 
 ### Step 1: Bootstrap Cloud Storage & Registries
-Execute the bootstrap automation script to initialize remote state storage (S3 bucket and DynamoDB lock table) and private Amazon ECR repositories:
+Execute the bootstrap automation script to initialize remote state storage (S3 bucket with native locking) and private Amazon ECR repositories:
 ```bash
 chmod +x scripts/*.sh
 ./scripts/bootstrap-aws.sh
 ```
 
 ### Step 2: Provision Infrastructure with OpenTofu
-
 Initialize the AWS provider modules, inspect the execution plan, and provision the VPC network and Amazon EKS cluster:
 ```bash
 cd opentofu/aws
@@ -198,9 +201,7 @@ cd ../..
 ```
 
 ### Step 3: Build & Push Hardened Container Images
-
 Log in to Amazon ECR, build the multi-stage distroless containers, and push them to your registry:
-
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION="eu-west-1"
@@ -219,18 +220,14 @@ docker push ${ECR_URL}/frontend-app:v1.0.0
 ```
 
 ### Step 4: Install Istio Service Mesh
-
 Deploy the Istio control plane using the default production profile and label the workload namespace for automatic Envoy sidecar injection:
-
 ```bash
 istioctl install --set profile=default -y
 kubectl label namespace default istio-injection=enabled --overwrite
 ```
 
 ### Step 5: Deploy Application Workloads & Zero-Trust Mesh
-
 Apply base workloads (PostgreSQL StatefulSet, Backend, Frontend) followed by Istio routing and security configurations:
-
 ```bash
 # Deploy Database, Backend, and Frontend workloads
 kubectl apply -k k8s/base/
@@ -243,6 +240,21 @@ kubectl rollout status deployment/frontend --timeout=120s
 kubectl rollout status deployment/backend --timeout=120s
 kubectl rollout status statefulset/postgres-db --timeout=120s
 ```
+
+### Step 6: Deploy Observability Stack
+Deploy the Prometheus/Grafana stack via Helm and configure the Jaeger tracing backend for capturing distributed spans:
+```bash
+helm repo add prometheus-community [https://prometheus-community.github.io/helm-charts](https://prometheus-community.github.io/helm-charts)
+helm repo update
+
+helm install prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  -f k8s/observability/kube-prometheus-values.yaml
+
+kubectl apply -f k8s/observability/jaeger-deployment.yaml
+```
+
+---
 
 ## 7. Observability & SRE Golden Signals
 
@@ -344,6 +356,6 @@ cd opentofu/aws
 tofu destroy -auto-approve
 cd ../..
 
-# 2. Delete ECR repositories, DynamoDB lock table, and S3 state storage
+# 2. Delete ECR repositories and S3 state storage
 ./scripts/teardown-aws.sh
 ```
