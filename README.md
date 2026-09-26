@@ -172,10 +172,11 @@ Before executing any infrastructure scripts, you must authenticate your local te
 
 ```bash
 # Configure your local AWS profile (Requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)
-`aws configure`
+aws configure
 
 # Verify your active identity
-`aws sts get-caller-identity`
+aws sts get-caller-identity
+```
 
 ## 6. Step-by-Step Deployment Runbook
 
