@@ -209,22 +209,24 @@ cd ../..
 ```
 
 ### Step 3: Build & Push Hardened Container Images
-Log in to Amazon ECR, build the multi-stage distroless containers, and push them to your registry:
+Log in to Amazon ECR, build the multi-stage distroless containers directly with your release tags, and push them to your private registry:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION="eu-south-2"
 ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-# Log Docker into the private Amazon ECR registry
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URL
+# 1. Log Docker into the private Amazon ECR registry
+aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_URL"
 
-# Build and push Backend image (FastAPI / Distroless)
-docker build -t ${ECR_URL}/backend-app:v1.0.0 apps/backend
-docker push ${ECR_URL}/backend-app:v1.0.0
+# 2. Build Backend image directly with the ECR target tag
+docker build -t "${ECR_URL}/backend-app:v1.0.0" apps/backend
 
-# Build and push Frontend image (Express / Distroless)
-docker build -t ${ECR_URL}/frontend-app:v1.0.0 apps/frontend
-docker push ${ECR_URL}/frontend-app:v1.0.0
+# 3. Build Frontend image directly with the ECR target tag
+docker build -t "${ECR_URL}/frontend-app:v1.0.0" apps/frontend
+
+# 4. Push both images to Amazon ECR
+docker push "${ECR_URL}/backend-app:v1.0.0"
+docker push "${ECR_URL}/frontend-app:v1.0.0"
 ```
 
 ### Step 4: Install Istio Service Mesh
@@ -235,9 +237,9 @@ kubectl label namespace default istio-injection=enabled --overwrite
 ```
 
 ### Step 5: Deploy Application Workloads & Zero-Trust Mesh
-Apply base workloads (PostgreSQL StatefulSet, Backend, Frontend) followed by Istio routing and security configurations:
+Apply the core base workloads via Kustomize (PostgreSQL StatefulSet, Backend, Frontend deployments) followed by Istio routing and security configurations:
 ```bash
-# Deploy Database, Backend, and Frontend workloads
+# Deploy Database, Backend, and Frontend workloads using Kustomize
 kubectl apply -k k8s/base/
 
 # Apply Zero-Trust Mesh configurations (Strict mTLS, Ingress Gateway, Network Policies)
@@ -367,3 +369,13 @@ cd ../..
 # 2. Delete ECR repositories and S3 state storage
 ./scripts/teardown-aws.sh
 ```
+
+## 10. Troubleshooting
+
+**Docker Login Error (Linux/Fedora): `pass not initialized`** 
+If you encounter a credential store error when piping the AWS STS token to `docker login` on Linux (as in [Step 3: Build & Push Hardened Container Images](#step-3-build--push-hardened-container-images)), it is likely because Docker defaults to using `pass` (a password manager) which may not be initialized with a GPG key on your local machine.
+
+You can temporarily bypass this credential helper by backing up your Docker config before authenticating:
+```bash
+mv ~/.docker/config.json ~/.docker/config.json.backup
+# Retry the AWS ECR login command
