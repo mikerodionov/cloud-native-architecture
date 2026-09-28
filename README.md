@@ -191,12 +191,19 @@ chmod +x scripts/*.sh
 Initialize the AWS provider modules, inspect the execution plan, and provision the VPC network and Amazon EKS cluster:
 ```bash
 cd opentofu/aws
-tofu init
-tofu plan -out=tfplan
-tofu apply tfplan
+
+AWS_REGION="eu-south-2"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET_NAME="tofu-state-cloudnative-${ACCOUNT_ID}-${AWS_REGION}"
+
+tofu init \
+  -backend-config="bucket=${BUCKET_NAME}" \
+  -backend-config="region=${AWS_REGION}"
+
+tofu apply
 
 # Authenticate local kubectl context with the newly provisioned Amazon EKS cluster
-aws eks update-kubeconfig --region eu-west-1 --name prod-cloud-native-eks
+aws eks update-kubeconfig --region eu-south-2 --name prod-cloud-native-eks
 kubectl get nodes
 cd ../..
 ```
@@ -205,7 +212,7 @@ cd ../..
 Log in to Amazon ECR, build the multi-stage distroless containers, and push them to your registry:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION="eu-west-1"
+AWS_REGION="eu-south-2"
 ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Log Docker into the private Amazon ECR registry
