@@ -367,6 +367,10 @@ kubectl port-forward -n monitoring svc/prometheus-stack-grafana 3000:80 &
 # Start port forwaring in the background
 kubectl port-forward -n monitoring svc/jaeger 16686:16686 &
 
+# Access Prometheus UI - http://localhost:9090 (Status -> Targets: envoy-stats-monitor scrape health)
+# Start port forwaring in the background
+kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
+
 # Logs: application logs and Envoy access logs (response code, flags, x-request-id)
 kubectl logs -l app=frontend -c frontend -f
 kubectl logs -l app=frontend -c istio-proxy -f
