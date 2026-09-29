@@ -1,0 +1,18 @@
+# Istio control plane configuration: istioctl install -f k8s/mesh/istio-operator.yaml -y
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: control-plane
+  namespace: istio-system
+spec:
+  profile: default
+  meshConfig:
+    # Envoy access logs on stdout (kubectl logs <pod> -c istio-proxy) -> Logs pillar
+    accessLogFile: /dev/stdout
+    enableTracing: true
+    extensionProviders:
+      # Zipkin (B3) provider: matches the x-b3-* headers propagated by the frontend
+      - name: zipkin
+        zipkin:
+          service: jaeger.monitoring.svc.cluster.local
+          port: 9411
