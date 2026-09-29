@@ -270,14 +270,28 @@ kubectl rollout status statefulset/postgres-db --timeout=120s
 ### Step 6: Deploy Observability Stack
 Deploy the Prometheus/Grafana stack via Helm and configure the Jaeger tracing backend for capturing distributed spans:
 ```bash
-helm repo add prometheus-community [https://prometheus-community.github.io/helm-charts](https://prometheus-community.github.io/helm-charts)
+# Create the monitoring namespace
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+# Add and update Prometheus community helm chart
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
-helm install prometheus-stack prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
-  -f k8s/observability/kube-prometheus-values.yaml
+# Install kube-prometheus-stack
+helm upgrade --install prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --version 60.0.0 \
+  -f k8s/observability/prometheus-values.yaml \
+  --wait
 
-kubectl apply -f k8s/observability/jaeger-deployment.yaml
+# Apply Jaeger tracing backend
+kubectl apply -f k8s/observability/jaeger-all-in-one.yaml
+
+# Apply Golden Signals Dashboard ConfigMap
+kubectl apply -f k8s/observability/grafana-dashboard-goldensignals.yaml
+
+# Ensure all components of the monitoring stack and Jaeger are running successfully in the monitoring namespace
+kubectl get pods -n monitoring
 ```
 
 ---
@@ -286,8 +300,12 @@ kubectl apply -f k8s/observability/jaeger-deployment.yaml
 
 ### Local Telemetry Dashboard Access
 Forward local ports to inspect Prometheus metrics, Grafana dashboards, and Jaeger traces directly:
+
 ```bash
-# Access Grafana Dashboards (Default credentials: admin / immune)
+# Verify Grafana Admin Access & Password Retrieval
+kubectl --namespace monitoring get secrets prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+# Access Grafana Dashboards - http://localhost:3000 (User: admin, password from above command)
 kubectl port-forward -n monitoring svc/prometheus-stack-grafana 3000:80
 
 # Access Jaeger Distributed Tracing UI
