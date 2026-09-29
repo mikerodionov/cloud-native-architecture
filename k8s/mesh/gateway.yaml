@@ -1,0 +1,43 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: main-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: application-routing
+  namespace: default
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - main-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /api/data
+      route:
+        - destination:
+            host: frontend-service
+            port:
+                number: 3000
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: frontend-service
+            port:
+                number: 3000
