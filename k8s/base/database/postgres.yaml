@@ -43,6 +43,8 @@ spec:
               value: "postgres"
             - name: POSTGRES_PASSWORD
               value: "postgres"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata  
           resources:
             requests:
               cpu: "100m"
@@ -74,6 +76,7 @@ spec:
         name: postgres-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp2
         resources:
           requests:
-            storage: 5Gi
+            storage: 10Gi

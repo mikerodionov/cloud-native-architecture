@@ -234,15 +234,31 @@ Deploy the Istio control plane using the default production profile and label th
 ```bash
 istioctl install --set profile=default -y
 kubectl label namespace default istio-injection=enabled --overwrite
+# Verify that istio-ingressgateway and istiod pods are running
+kubectl get pods -n istio-system
 ```
 
 ### Step 5: Deploy Application Workloads & Zero-Trust Mesh
-Apply the core base workloads via Kustomize (PostgreSQL StatefulSet, Backend, Frontend deployments) followed by Istio routing and security configurations:
-```bash
-# Deploy Database, Backend, and Frontend workloads using Kustomize
-kubectl apply -k k8s/base/
+To maintain repository portability and avoid hardcoding cloud provider IDs, the deployment runbook dynamically injects your live AWS Account ID into the committed AWS Kustomize overlay at runtime:
 
-# Apply Zero-Trust Mesh configurations (Strict mTLS, Ingress Gateway, Network Policies)
+```bash
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION="eu-south-2"
+ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+# Navigate to the AWS overlay and inject the live ECR registry URL
+cd k8s/overlays/aws
+kustomize edit set image backend-app=${ECR_URL}/backend-app:v1.0.0
+kustomize edit set image frontend-app=${ECR_URL}/frontend-app:v1.0.0
+
+# Deploy core workloads (Frontend, Backend, PostgreSQL) via the AWS Kustomize overlay
+kubectl apply -k .
+
+# Discard local changes to kustomization.yaml to keep git status clean (simulating ephemeral CI/CD runners)
+git checkout kustomization.yaml
+
+# Return to root and apply Zero-Trust Mesh configurations (Strict mTLS, Ingress Gateway, Network Policies)[cite: 1]
+cd ../../../
 kubectl apply -f k8s/mesh/
 
 # Verify rollout status across all deployments
@@ -361,12 +377,20 @@ kubectl run lateral-attack --rm -i --restart=Never --image=busybox -- nc -zv -w 
 To avoid unnecessary cloud consumption costs, destroy all cloud resources in reverse order:
 
 ```bash
-# 1. Decommission EKS cluster and VPC infrastructure
+# Delete Istio components, application workloads, and load balancer services
+istioctl uninstall --purge -y
+kubectl delete -k k8s/overlays/aws/
+kubectl delete -f k8s/mesh/
+kubectl delete -k k8s/base/
+kubectl delete svc --all -n default
+
+# Give AWS a moment to clean up the NLBs, then run OpenTofu destroy
+# Decommission EKS cluster and VPC infrastructure
 cd opentofu/aws
 tofu destroy -auto-approve
 cd ../..
 
-# 2. Delete ECR repositories and S3 state storage
+# Delete ECR repositories and S3 state storage
 ./scripts/teardown-aws.sh
 ```
 
@@ -379,3 +403,28 @@ You can temporarily bypass this credential helper by backing up your Docker conf
 ```bash
 mv ~/.docker/config.json ~/.docker/config.json.backup
 # Retry the AWS ECR login command
+```
+
+**EKS Pod Creation Stuck / Istio Webhook Timeout**
+If pods are stuck and event logs show FailedCreate with context deadline exceeded calling the Istio sidecar injector webhook:
+
+```
+Error creating: Internal error occurred: failed calling webhook "namespace.sidecar-injector.istio.io": failed to call webhook: Post "https://istiod.istio-system.svc:443/inject?timeout=10s": context deadline exceeded
+```
+
+By default, the AWS-managed EKS control plane security group only allows outbound traffic to worker nodes on standard Kubernetes ports (like 443 and 10250). Istio's sidecar injection webhook relies on port 15017. To fix this, your OpenTofu EKS module must include an explicit security group rule allowing the control plane to reach port 15017 on your worker nodes. (Note: This has already been applied in opentofu/aws/main.tf).
+
+**Failing to desroy Internet Gateway and Subnet**
+When you try to destroy your AWS infrastructure you can see an below errors
+
+```
+Error: deleting EC2 Internet Gateway (<IGW_ID>): detaching EC2 Internet Gateway (<IGW_ID>) from VPC (<VPC_ID>): operation error EC2: DetachInternetGateway, https response error StatusCode: 400, RequestID: <REQUEST_ID>, api error DependencyViolation: Network <VPC_ID> has some mapped public address(es). Please unmap those public address(es) before detaching the gateway.
+
+Error: deleting EC2 Subnet (<SUBNET_ID>): operation error EC2: DeleteSubnet, https response error StatusCode: 400, RequestID: <REQUEST_ID>, api error DependencyViolation: The subnet '<SUBNET_ID>' has dependencies and cannot be deleted.
+```
+
+The DependencyViolation error occurs because AWS Network Load Balancers (NLBs) or Elastic Network Interfaces (ENIs) were dynamically created in your subnets by Kubernetes (specifically by your Istio IngressGateway or services of type: LoadBalancer).
+
+Because these load balancers were spun up dynamically inside your cluster after OpenTofu provisioned the VPC and EKS cluster, OpenTofu's state file doesn't track them directly. When OpenTofu tries to tear down the VPC, subnets, and Internet Gateway, AWS blocks the deletion because those lingering load balancers are still holding public IP addresses and active attachments inside your subnets.
+
+Either delete AWS load balancer via console and rerun tofu destroy. If you follow [## 9. Decommissioning & Teardown](#9-decommissioning--teardown) instructions and perform clean up of Kubernetes resources first you should not see this error.
