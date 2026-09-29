@@ -1,0 +1,22 @@
+# Chaos experiment: Istio aborts 50% of frontend -> backend calls with HTTP 500.
+# Apply:  kubectl apply -f k8s/chaos/fault-injection.yaml
+# Revert: kubectl delete -f k8s/chaos/fault-injection.yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: backend-fault-injection
+  namespace: default
+spec:
+  hosts:
+    - backend-service
+  http:
+    - fault:
+        abort:
+          percentage:
+            value: 50
+          httpStatus: 500
+      route:
+        - destination:
+            host: backend-service
+            port:
+              number: 8000
