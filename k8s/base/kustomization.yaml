@@ -8,6 +8,6 @@ resources:
 
 images:
   - name: backend-app
-    newTag: v1.0.0
+    newTag: v1.0.3
   - name: frontend-app
     newTag: v1.0.0

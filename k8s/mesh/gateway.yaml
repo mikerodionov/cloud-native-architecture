@@ -30,9 +30,9 @@ spec:
             prefix: /api/data
       route:
         - destination:
-            host: backend-service
+            host: frontend-service
             port:
-                number: 8000
+                number: 3000
     - match:
         - uri:
             prefix: /

@@ -9,7 +9,7 @@ resources:
 images:
   - name: backend-app
     newName: YOUR_AWS_ACCOUNT_ID.dkr.ecr.eu-south-2.amazonaws.com/backend-app
-    newTag: v1.0.0
+    newTag: v1.0.3
   - name: frontend-app
     newName: YOUR_AWS_ACCOUNT_ID.dkr.ecr.eu-south-2.amazonaws.com/frontend-app
     newTag: v1.0.0
